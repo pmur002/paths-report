@@ -1,0 +1,788 @@
+<?xml version="1.0" encoding="utf-8"?>
+<html>
+<head>
+  <style type="text/css">
+    @media print {
+      body { }
+      p.img { text-align: center; page-break-inside: avoid }
+      img.CC { display: inline }
+    }
+    @media screen {
+      body { max-width: 800px; margin: auto }
+      p.img { text-align: center }
+      img.CC { display: inline }
+    }
+    p.date {
+      font-size: smaller;
+      margin: 0;
+    }
+    p.versionHistory {
+      color: gray
+    }
+    p.versionHistory a {
+      color: gray
+    }
+    p.ref {
+      text-indent: -2em;
+      padding-left: 2em;
+    }
+    p.fig {
+      text-align: left;
+    }
+    p.fig img, img.plot {
+      box-shadow: 10px 10px 20px;
+      margin-top: 10px;
+      margin-bottom: 20px;      
+    }
+  </style>
+
+</head>
+<body>
+  <h1>The Path to Path Enlightenment:<br/>
+  Stroking and Filling Paths in R Graphics</h1>
+  <p>
+    <span style="font-style: italic">by Paul Murrell</span>
+    <a href="http://orcid.org"><img alt="" src="https://www.stat.auckland.ac.nz/~paul/ORCID/ORCiD.png" style="width: 16px; height: 16px; vertical-align: middle" /></a> <span style="font-family: mono; font-size: small"><a href="http://orcid.org/0000-0002-3224-8858">http://orcid.org/0000-0002-3224-8858</a></span>
+  </p>
+  <p class="date">
+    Version 1:  
+    <rcode echo="FALSE" results="asis"><![CDATA[
+cat(format(Sys.Date(), "%A %d %B %Y"))
+    ]]></rcode>
+  </p>
+
+  <rcode id="init" echo="FALSE" message="FALSE" results="hide"><![CDATA[
+opts_chunk$set(comment=" ", tidy=FALSE, 
+               dev="png", ## dev="svg",
+               dpi=96)
+options(width=100)
+## For wonky desktop set up
+options(bitmapType="cairo")
+  ]]></rcode>
+  <rcode echo="FALSE" message="FALSE"><![CDATA[
+    library(grid)
+  ]]></rcode>
+
+  <hr/>
+  <p>
+    <a rel="license"
+    href="http://creativecommons.org/licenses/by/4.0/"><img class="CC"
+    alt="Creative Commons License" style="border-width:0"
+    src="https://i.creativecommons.org/l/by/4.0/88x31.png"/></a><br/><span
+    xmlns:dct="http://purl.org/dc/terms/"
+    property="dct:title">This document</span>
+    by <span xmlns:cc="http://creativecommons.org/ns#"
+    property="cc:attributionName">Paul
+    Murrell</span> is licensed under a <a rel="license"
+    href="http://creativecommons.org/licenses/by/4.0/">Creative
+    Commons Attribution 4.0 International License</a>.
+  </p>
+  <hr/>
+  <p>
+    This document describes an expansion of the R graphics engine
+    to support stroking and filling paths. 
+  </p>
+  <p>
+    These features are available in the development version of R 
+    (to become 4.2.0).
+  </p>
+  <p>
+    R users wanting to try out the new graphics features should start with
+    the <a href="#api"/> Section, which provides a quick introduction
+    to the new R-level interface.
+  </p>
+  <p>
+    Maintainers of R packages that provide R graphics devices should
+    read the <a href="#device"/> Section, which provides a description of the
+    required changes to R graphics devices. 
+  </p>
+  <p>
+    These new graphics features have not (yet) been implemented for
+    all of the graphics devices provided by the 'grDevices'
+    package. Devices that do support the new features are the 
+    <code>pdf()</code> graphics device and Cairo graphics devices:
+    <code>x11(type="cairo")</code>, <code>cairo_pdf()</code>,
+    <code>cairo_ps()</code>, <code>png(type="cairo")</code>,
+    <code>jpeg(type="cairo")</code>, <code>tiff(type="cairo")</code>, 
+    and <code>svg()</code>.
+    The remainder of the graphics
+    devices in 'grDevices' will run, but will (silently) not produce
+    the correct output. Graphics devices from other R packages should
+    be reinstalled and will not produce the correct output until
+    (or unless)
+    the package maintainer adds support.
+  </p>
+
+  <toc/>
+
+  <h2><a name="intro">Introduction</a></h2>
+
+  <p>
+    Changes to the graphics engine in R 4.1.0 added support for
+    gradient and pattern fills, clipping paths, and masks 
+    (<a href="#murrell-definitions-2020"/>).  
+    One way to think of those changes is that they
+    create an R interface to some of the more advanced graphical features
+    of specific R graphics devices;  graphics devices that are based on 
+    sophisticated graphics systems, like the <code>pdf()</code> device
+    that is based on the Adobe Portable Document Format 
+    (<a href="#PDF"/>) and the graphics
+    devices based on the Cairo graphics library (<a href="#cairo"/>).
+    This document describes another step along that path, by adding 
+    an R interface to generate "paths" from a collection of graphical objects.
+  </p>
+  <p>
+    As with the group features that have been recently added to
+    R graphics (<a href="#murrell-groups-2021"/>), the main motivation
+    behind adding the new path features is to increase the 
+    range of graphical output that can be produced entirely with R
+    code, so that users do not have to resort to manual tweaks with
+    software like Adobe Illustrator.
+    As a consequence, the examples in this report involve 
+    only basic shapes that demonstrate the fundamental concepts.
+    There are no obvious connections to traditional data 
+    visualisation, though of course the possibility of 
+    future connections arising cannot
+    be entirely ruled out.
+  </p>
+  
+  <h3>One shape at a time</h3>
+  <p>
+    R graphics follows a very simple graphics model:  
+    it only draws one shape at a time.  For example, the following
+    code draws a circle and then a rectangle. Both shapes have an
+    opaque border, but a semitransparent fill, which allows us to 
+    see that the rectangle, which is drawn second,
+    is drawn on top of the circle.
+  </p>
+
+  <rcode><![CDATA[
+library(grid)
+  ]]></rcode>
+
+  <rcode fig.width="2" fig.height="2"><![CDATA[
+grid.circle(.6, .6, r=.2, 
+            gp=gpar(col=4, lwd=5, fill=adjustcolor(4, alpha=.5)))
+grid.rect(.4, .4, width=.4, height=.4, 
+          gp=gpar(col=2, lwd=5, fill=adjustcolor(2, alpha=.5)))
+  ]]></rcode>
+
+  <h3>Paths on graphics devices</h3>
+
+  <p>
+    R graphics output is sent to a <em>graphics device</em> either to draw
+    to the screen, or to record the drawing in a file.  For example,
+    the <code>postscript()</code> device records drawing
+    in a PostScript file.
+  </p>
+  <p>
+    The simplicity of R graphics means that R graphics devices are only asked to
+    draw one shape at a time, e.g., draw a circle <em>then</em> 
+    draw a rectangle.
+    For example, the PostScript to draw a circle and a rectangle could look like
+    the following.  The important part of the code is the clear separation
+    into two shapes, each starting with a 
+    <code>newpath</code> and ending with a <code>fill</code>
+    (to fill the shape).
+  </p>
+
+  <rcode echo="FALSE"><![CDATA[
+system("convert ps-painters.ps ps-painters.png")
+cat(readLines("ps-painters.ps"), sep="\n")
+  ]]></rcode>
+
+  <p>
+    <img src="ps-painters.png"/>
+  </p>
+
+  <p>
+    However, many graphics devices support a more sophisticated drawing
+    model based on <em>paths</em>.  In this model, a single path can be
+    constructed from more than one shape.  For example, the PostScript
+    code below draws the same two shapes as before, but draws them
+    within a single path (and then fills that single path). In this code,
+    we can see only one <code>newpath</code> and only one <code>fill</code>.
+  </p>
+
+  <rcode echo="FALSE"><![CDATA[
+system("convert ps-path.ps ps-path.png")
+cat(readLines("ps-path.ps"), sep="\n")
+  ]]></rcode>
+
+  <p>
+    <img src="ps-path.png"/>
+  </p>
+
+  <p>
+    The result in this case is a filled area that is just the union of the
+    two individual shapes, but we can get more interesting results by
+    controlling how the "inside" of the path is interpreted.  For example,
+    the following PostScript code creates exactly the same
+    single path from the two shapes, but this time runs <code>eofill</code>
+    (rather than <code>fill</code>).  That changes to an "even-odd" fill rule
+    (from the default "non-zero winding" rule), so the overlap 
+    between the two shapes within the path is now "outside" the overall
+    path and we get a shape with a hole in it.
+  </p>
+
+  <rcode echo="FALSE"><![CDATA[
+system("convert ps-path-hole.ps ps-path-hole.png")
+cat(readLines("ps-path-hole.ps"), sep="\n")
+  ]]></rcode>
+
+  <p>
+    <img src="ps-path-hole.png"/>
+  </p>
+
+  <h3>Paths in R</h3>
+  <p>
+    The changes described in this report allow us to draw these
+    more sophisticated paths in R graphics.  As a simple demonstration,
+    the following code defines a 'grid' gTree consisting of 
+    a circle grob and a rectangle grob.
+  </p>
+  <rcode><![CDATA[
+gt <- gTree(children=gList(circleGrob(.6, .6, r=.2,
+                                      gp=gpar(col=4, lwd=5, 
+                                              fill=adjustcolor(4, alpha=.5))),
+                           rectGrob(.4, .4, width=.4, height=.4,
+                                    gp=gpar(col=2, lwd=5, 
+                                            fill=adjustcolor(2, alpha=.5)))))
+  ]]></rcode>
+  <p>
+    If we draw this gTree normally, 
+    the circle and the rectangle are drawn
+    as separate shapes and we get the rectangle drawn on top 
+    of the circle.
+  </p>
+  <rcode fig.width="2" fig.height="2"><![CDATA[
+grid.draw(gt)
+  ]]></rcode>
+  <p>
+    With the new changes, we can instead draw the gTree as a single
+    path (and fill and stroke the path) with the code shown below.
+  </p>
+  <rcode fig.width="2" fig.height="2"><![CDATA[
+grid.fillStroke(gt, 
+                gp=gpar(col=2, lwd=5, fill=adjustcolor(2, alpha=.5)),
+                rule="evenodd")
+  ]]></rcode>
+  <p>
+    The result is a single path based on the combination of the circle
+    and the rectangle and, because we specified <code>rule="evenodd"</code>,
+    that path is filled and stroked using the even-odd rule
+    used to determine where to fill.  This means that we get a hole
+    in the path where the two shapes overlap.
+  </p>
+
+  <h2><a name="api">User API</a></h2>
+
+  <p>
+    The new features for stroking and filling paths are only available via
+    functions in the 'grid' package (so far).
+    The <code>grid.stroke()</code> function strokes a path,
+    the <code>grid.fill()</code> function fills a path,
+    and the <code>grid.fillStroke()</code> functions fills and 
+    strokes a path.
+    In all three cases, the path is defined by a 'grid' grob.
+    The simplest example is a single shape as in the code below.
+  </p>
+  <rcode fig.width="2" fig.height="2"><![CDATA[
+grid.stroke(circleGrob(r=.3))
+  ]]></rcode>
+  <p>
+    This example behaves just like normal 'grid'
+    drawing, but already there are some important differences.
+    For example, the following code produces exactly the same
+    result even though it is based on a <em>filled</em> circle grob.
+  </p>
+  <rcode fig.width="2" fig.height="2"><![CDATA[
+grid.stroke(circleGrob(r=.3, gp=gpar(fill="grey")))
+  ]]></rcode>
+  <p>
+    This demonstrates an important principle of paths in R:
+    <strong>a grob only contributes its outline to a path</strong>.
+    The following code demonstrates that this also applies to
+    the fill rule for a "path" grob.  
+  </p>
+  <p>
+    First we describe a shape using the <code>pathGrob()</code> 
+    function which consists of two rectangles, one nested within the
+    other.   This includes a fill rule (<code>winding</code>)
+    that means that the
+    inner rectangle should be filled.  This shape is drawn on the
+    left of the image.  Next, we define a path based on this shape,
+    but with a different fill rule (<code>evenodd</code>).  
+    When we fill the path, the 
+    shape only contributes its outline, its fill rule 
+    (<code>winding</code>) is ignored.
+    The fill rule for the path (<code>evenodd</code>) is enforced to
+    determine the fill region, which means that
+    the inner rectangle is NOT filled.  This result is drawn on the right.
+  </p>
+  <rcode fig.width="4" fig.height="2"><![CDATA[
+shape <- pathGrob(c(.2, .2, .8, .8, .4, .4, .6, .6),
+                  c(.2, .8, .8, .2, .4, .6, .6, .4),
+                  id=rep(1:2, each=4),
+                  rule="winding",
+                  gp=gpar(fill="grey"))
+pushViewport(viewport(x=0, width=.5, just="left"))
+grid.draw(shape)
+popViewport()
+pushViewport(viewport(x=.5, width=.5, just="left"))
+grid.fillStroke(shape, rule="evenodd", gp=gpar(fill="grey"))
+popViewport()
+  ]]></rcode>
+  <p>
+    The next example demonstrates one way in which this
+    behaviour - shapes only contribute outlines - might be useful.  
+    We use a text grob to add
+    the outlines of text glyphs to a path and then stroke the path
+    to produce outlined text.
+  </p>
+  <rcode fig.width="2" fig.height="2"><![CDATA[
+grid.stroke(textGrob("outline", gp=gpar(cex=3)))
+  ]]></rcode>  
+  <p>
+    The next example shows another important point: 
+    functions like <code>grid.stroke()</code> have a <code>gp</code>
+    argument that controls the graphical parameters that are 
+    used to draw the path.  In this case, a circle grob
+    with the default line width of 1 is used to define the path.
+    The grob only contributes its outline to the path;  its
+    line width is ignored.
+    The <code>grid.stroke()</code> call specifies a line width of 5,
+    so the path is stroked using a thick line.
+  </p>
+  <rcode fig.width="2" fig.height="2"><![CDATA[
+grid.stroke(circleGrob(r=.3), gp=gpar(lwd=5))
+  ]]></rcode>  
+  <p>
+    The next example is slightly more complex because it 
+    involves a path that is based on more than one shape.
+    This code works with a path that is based on two overlapping
+    circles.  We use <code>grid.fill()</code> this time to
+    fill the path.
+    The result is interesting because we have filled the path
+    with a semitransparent red (and drawn text underneath 
+    to emphasise that we can see through the fill).
+    The <code>grid.fill()</code> function fills the "inside"
+    of the path, which in this case is the union of the
+    two circles.
+  </p>
+  <rcode fig.width="2" fig.height="2"><![CDATA[
+grid.text("background")
+grid.fill(circleGrob(1:2/3, r=.3), 
+          gp=gpar(fill=adjustcolor(2, alpha=.5)))
+  ]]></rcode>  
+  <p>
+    For comparison,
+    the following code draws the grob normally (two overlapping circles)
+    using a semitransparent red fill, just to emphasise how the
+    path-filling behaviour is different.  For a start, drawing
+    the grob draws the circle borders (whereas <code>grid.fill()</code>, 
+    will only ever fill a path), but more importantly, 
+    drawing the grob fills each circle separately, so we get
+    an intersection region where the top circle partially overlaps the
+    bottom circle.
+  </p>
+  <rcode fig.width="2" fig.height="2"><![CDATA[
+grid.text("background")
+grid.circle(1:2/3, r=.3, 
+            gp=gpar(fill=adjustcolor(2, alpha=.5)))
+  ]]></rcode>  
+  <p>
+    The <code>grid.fill()</code> and <code>grid.fillStroke()</code>
+    functions have an additional argument, <code>rule</code>,
+    that controls the fill-rule that is used to fill the path.
+    The following code again fills a path based on the two overlapping circles, 
+    but this time uses the even-odd fill rule.
+    This results in a filled path with a hole where the circles 
+    overlap.
+  </p>
+  <rcode fig.width="2" fig.height="2"><![CDATA[
+grid.text("background")
+grid.fill(circleGrob(1:2/3, r=.3), 
+          gp=gpar(fill=adjustcolor(2, alpha=.5)), 
+          rule="evenodd")
+  ]]></rcode>  
+
+  <h2>Clipping paths</h2>
+  <p>
+    Clipping paths, which were added to the R graphics system
+    in R 4.1.0, are also based on 'grid' grobs and they produce
+    a single path from multiple shapes just like the paths
+    described above.  
+  </p>
+  <p>
+    <strong>The region that output is clipped to, based on a clipping path,
+    is the region that would be filled, if that clipping path was
+    filled.</strong>
+  </p>
+  <p>
+    Unfortunately, in the original implementation of clipping paths,
+    this distinction was not made clear and no facility was provided
+    to specify the fill rule for a clipping path.
+  </p>
+  <p>
+    The new function <code>as.path(grob, gp, rule)</code> is designed
+    to help fix this problem.
+    This function combines a grob with graphical parameter settings
+    and a fill rule;  it defines a path, how to fill it, and what
+    colours and line types to use when filling or stroking the path.
+  </p>
+  <p>
+    Clipping paths, as already implemented in R 4.1.0 via 
+    <code>viewport(clip=grob)</code>, can now also be specified
+    via <code>viewport(clip=as.path(grob, gp, rule))</code>.
+    This allows the fill rule for a clipping path to be specified 
+    by the user.
+    The code below demonstrates this by defining two clipping paths,
+    both consisting of two overlapping circles, but one using
+    the even-odd fill rule and one using the (default) non-zero winding rule.
+  </p>
+  <rcode><![CDATA[
+circles <- circleGrob(1:2/3, r=.3)
+clipPath1 <- circles
+clipPath2 <- as.path(circles, rule="evenodd")
+  ]]></rcode>
+  
+  <p>
+    The following code pushes two viewports, one using the first clipping
+    path (on the left) and one using the second clipping path (on the right), 
+    and fills a rectangle
+    using a checkerboard pattern (code for the pattern not shown).
+    We can clearly see that the clipping paths differ based on the
+    path fill rule that is used.
+  </p>
+  <!-- NOTE that this example produces PDF output that displays
+       correctly in xpdf AND Adobe Acrobat (but not, e.g., evince) 
+  -->
+  <rcode echo="FALSE"><![CDATA[
+rects <- gTree(children=gList(rectGrob(width=unit(5, "mm"), 
+                                       height=unit(5, "mm"),
+                                       just=c("left", "bottom"),
+                                       gp=gpar(fill="black")),
+                              rectGrob(width=unit(5, "mm"), 
+                                       height=unit(5, "mm"),
+                                       just=c("right", "top"),
+                                       gp=gpar(fill="black"))))
+pat <- pattern(rects,
+               width=unit(1, "cm"), height=unit(1, "cm"),
+               extend="repeat")
+  ]]></rcode>
+  <rcode fig.width="4" fig.height="2"><![CDATA[
+pushViewport(viewport(x=0, width=.5, just="left", 
+                      clip=clipPath1))
+grid.rect(gp=gpar(fill=pat))
+popViewport()
+pushViewport(viewport(x=.5, width=.5, just="left", 
+                      clip=clipPath2))
+grid.rect(gp=gpar(fill=pat))
+popViewport()
+  ]]></rcode>
+  <p>
+    The functions <code>grid.stroke()</code>, 
+    <code>grid.fill()</code>, and <code>grid.fillStroke()</code>
+    are all generic so the user can supply a single 
+    argument using <code>as.path()</code> rather than specifying
+    the grobs, fill rule, and graphical parameters as separate arguments.
+    For example, the following two sets of code produce exactly the same
+    result.
+  </p>
+  <rcode eval="FALSE"><![CDATA[
+grid.text("background")
+grid.fill(circleGrob(1:2/3, r=.3),
+          gp=gpar(fill=adjustcolor(2, alpha=.5)),
+          rule="evenodd")
+  ]]></rcode>
+  <rcode fig.width="2" fig.height="2"><![CDATA[
+grid.text("background")
+grid.fill(as.path(circleGrob(1:2/3, r=.3),
+                  gp=gpar(fill=adjustcolor(2, alpha=.5)),
+                  rule="evenodd"))
+  ]]></rcode>
+  <p>
+    If we want to know what a clipping path is going to look like,
+    we can use <code>grid.fill()</code> on the clipping path.  The 
+    region that is filled will be the clipped region.
+  </p>
+
+  <h2><a name="device">Device API</a></h2>
+
+  <p>
+    The good news is that maintainers of R packages that implement
+    graphics devices do not need to do anything in response
+    to these changes.  Graphics device packages will need to be reinstalled
+    for R version 4.2.0, but they do not need to be updated.
+    The graphics engine will only make calls to the graphics device
+    to stroke or fill paths if the graphics device <code>deviceVersion</code>
+    is set to 15 (<code>R_GE_group</code>) or higher.  Of course, if 
+    the graphics device has a lower <code>deviceVersion</code>,
+    R code that attempts to stroke or fill paths will have no effect.
+  </p>
+
+  <h3>A template for no support</h3>
+  <p>
+    As an example of the (minimal) changes necessary to update a device
+    (<strong>without</strong> support for any of the new path features),
+    the following diff output
+    shows the changes made to the <code>postscript()</code>
+    device.
+  </p>
+  <pre>
+@@ -3033,6 +3033,14 @@
++static void     PS_stroke(SEXP path, const pGEcontext gc, pDevDesc dd);
++static void     PS_fill(SEXP path, int rule, const pGEcontext gc, pDevDesc dd);
++static void     PS_fillStroke(SEXP path, int rule, const pGEcontext gc,
++                              pDevDesc dd);
+
+@@ -3495,11 +3503,17 @@
++    dd->stroke          = PS_stroke;
++    dd->fill            = PS_fill;
++    dd->fillStroke      = PS_fillStroke;
+
+-    dd->deviceVersion = R_GE_definitions;
++    dd->deviceVersion = R_GE_group;
+
+@@ -4535,8 +4549,22 @@
++static void PS_stroke(SEXP path, const pGEcontext gc, pDevDesc dd) {}
++
++static void PS_fill(SEXP path, int rule, const pGEcontext gc, pDevDesc dd) {}
++
++static void PS_fillStroke(SEXP path, int rule, const pGEcontext gc,
++                          pDevDesc dd) {}
+  </pre>
+
+  <h3>Implementing support for paths</h3>
+  <p>
+    This section provides information about what to do
+    if a graphics device package wishes
+    to support the new path features.
+  </p>
+  <p>
+    The <code>dev->deviceVersion</code> must be set to 15
+    (<code>R_GE_groups</code>) or higher.
+  </p>
+  <p>
+    A device must implement the new 
+    <code>dev-&gt;stroke(path, gc, dd)</code>,
+    <code>dev-&gt;fill(path, rule, gc, dd)</code>, and
+    <code style="white-space: nowrap">dev-&gt;fillStroke(path, rule, gc, dd)</code> functions.
+    The <code>path</code> argument is an R function that the
+    device should evaluate to define the path.
+    As with clipping paths, masks, and groups,
+    this function will generate further calls to the device, which the device
+    should "capture" to define the path (rather than drawing immediately).
+  </p>
+  <p>
+    For <code>dev->fill</code> and <code>dev->fillStroke</code>,
+    the <code>rule</code> argument is an integer and
+    the device should set the fill rule based on this
+    (the graphics engine provides <code>R_GE_nonZeroWindingRule</code>
+    and <code>R_GE_evenOddRule</code> to switch on).
+  </p>
+  <p>
+    The device should then stroke, fill, or fill and stroke the path
+    (ideally, the graphics system being used will have a single
+    operator that performs the latter) using the current 
+    graphical parameter settings provided in the <code>gc</code> argument.
+  </p>
+  <p>
+    The existing <code>dev-&gt;setClipPath(path, ref, dd)</code> API
+    is unchanged;
+    the fill rule for the clipping path function is passed in 
+    via <code>attr(path, "rule")</code>.
+  </p>
+
+  <h3><a name="details">Exemplars</a></h3>
+  <p>
+    Support for these new features has been implemented for the
+    <code>pdf()</code> device and the devices that are based on Cairo
+    graphics, so the code for those devices demonstrates some
+    possible approaches to implementation.
+  </p>
+  <p>
+    Both Cairo and PDF devices use the "append mode" previously
+    introduced for capturing clipping paths 
+    (<a href="#murrell-definitions-2020"/>)
+    to accumulate a path before stroking or filling it.
+  </p>
+
+  <h2><a name="discussion">Discussion</a></h2>
+
+  <h3>Limitations</h3>
+  <p>
+    The most important limitation to acknowledge is the fact that
+    these new features are only currently supported on a subset
+    of the core graphics devices:  the <code>pdf()</code> device
+    and the devices based on Cairo graphics (e.g.,
+    <code>png(type="cairo")</code>,
+    <code>cairo_pdf()</code> and <code>svg()</code>).
+  </p>
+  <p>
+    In addition, the <code>pdf()</code> device 
+    only allows a single text object within a path
+    (no combining text with other drawing in a path).
+    Other drawing is just left out of a path that already contains text
+    and text is left out of a path
+    if other drawing already exists.
+    This also applies to clipping paths.
+  </p>
+  <!--
+    "Unlike PostScript, PDF does not allow a single path to mix text
+    outlines with lines and curves."
+    <a href="https://en.wikipedia.org/wiki/PDF#Vector_graphics">Wikipedia</a>.
+    -->
+
+  <h3>Listing and editing paths</h3>
+  <p>
+    As with groups (<a href="#murrell-groups-2021"/>)
+    we cannot directly see (<code>grid.ls()</code>) or edit 
+    (<code>grid.edit()</code>) the
+    grob that defines a path.  However, but with a little extra work,
+    it is possible to extract the
+    <code>path</code> component of a stroke, fill, or fillStroke
+    grob and edit/replace that.
+  </p>
+
+  <h3>Related work</h3>
+  <p>
+    The 'grid' graphics system already had a "path" interface
+    with its <code>grid.path()</code> function.
+    The difference between that interface and this new one
+    is that a <code>grid.path()</code> can only be constructed
+    from a set of vertices.
+    For example, suppose we want to fill a path from
+    two concentric circles, using an even-odd rule (so that the 
+    centre is empty).  With the new interface, the
+    code is very simple, as shown below.
+  </p>
+  <rcode fig.width="2" fig.height="2"><![CDATA[
+grid.fillStroke(circleGrob(r=c(.2, .4)), rule="evenodd", gp=gpar(fill=2))
+  ]]></rcode>
+  <p>
+    If we want to produce the same result with <code>grid.path()</code>
+    we have to construct vertices along the boundaries of the 
+    two circles, as shown below.
+  </p>
+  <rcode fig.width="2" fig.height="2"><![CDATA[
+t <- seq(0, 2*pi, length.out=50)
+circlePts <- function(r) list(x=.5 + r*cos(t), y=.5 + r*sin(t))
+c1 <- circlePts(.2)
+c2 <- circlePts(.4)
+grid.path(c(c1$x, c2$x), c(c1$y, c2$y), id=rep(1:2, each=50),
+          rule="evenodd", gp=gpar(fill=2))
+  ]]></rcode>  
+  <p>
+    Another approach to constructing paths from shapes is 
+    provided by the 'gridGeometry' (<a href="#pkg:gridGeometry"/>).
+    For example, the concentric circle problem can be solved
+    using this package
+    with the following code.
+  </p>
+  <rcode fig.width="2" fig.height="2"><![CDATA[
+library(gridGeometry)
+grid.polyclip(circleGrob(r=.4,), circleGrob(r=.2), "minus",
+              gp=gpar(fill=2))
+  ]]></rcode>
+  <p>
+    One advantage of the 'gridGeometry' approach is that it
+    should work for all R graphics devices.
+    However, some results, for example
+    stroking the outline of text, that are possible with the
+    new path features cannot be (easily) achieved with 'gridGeometry'.
+  </p>
+
+  <h2><a name="requirements">Technical requirements</a></h2>
+  <p>
+    The examples and discussion in this report relate to 
+    the development version of R (specifically revision 81125),
+    which will probably become R version 4.2.0.
+  </p>
+  <p>
+    This report was generated within a Docker container
+    (see <a href="#Resources">Resources</a> section below).
+  </p>
+
+  <h2><a name="Resources">Resources</a></h2>
+  <ul>
+    <li>
+      The <a href="paths.cml">raw source file</a> for this
+      report, a <a href="paths.xml">valid XML</a>
+      transformation of the source file, a <a
+      href="paths.Rhtml">'knitr' document</a> generated from
+      the XML file, 
+      two <a href="toc.R">R</a> <a href="bib.R">files</a> and
+      the <a href="paths.bib">bibtex file</a>
+      that are used to generate the table of contents and reference sections,
+      two <a href="common.xsl">XSL</a> <a
+      href="knitr.xsl">files</a> and an 
+      <a href="knit.R">R file</a> that are used to transform the XML to
+      the 'knitr' document, and a <a href="Makefile">Makefile</a> that
+      contains code for the other transformations and coordinates
+      everything.  
+      These materials are also available
+      on <a href="https://github.com/pmur002/paths-report/releases/tag/v1">github</a>.
+    </li>
+    <li>
+      This report was generated within a 
+      <a href="https://www.docker.com/">Docker</a> container.
+      The Docker command to build the report is included in the Makefile above.
+      The Docker image for the container is available from
+      <a href="https://hub.docker.com/r/pmur002/paths-report/">Docker Hub</a>;
+      alternatively, the image can be rebuilt from its 
+      <a href="Dockerfile">Dockerfile</a>.
+    </li>
+  </ul>
+
+  <h2>How to cite this report</h2>
+  <p>
+    Murrell, P. (2021). "Stroking and Filling Paths in R Graphics" 
+    Technical Report 2021-03, Department of Statistics, The University of Auckland. 
+    Version 1.
+    [ <a href="how-to-cite.bib">bib</a> |
+      <a href="http://dx.doi.org/10.17608/k6.auckland.12649751">DOI</a> | 
+      <a href="https://stattech.blogs.auckland.ac.nz/2020/07/14/2020-04-catching-up-with-r-graphics/">http</a> ]
+  </p>
+
+  <h2><a name="references">References</a></h2>
+  <ul style="list-style-type: none">
+    <li>
+      <a name="R"/>
+    </li>
+    <li>
+      <a name="murrell-definitions-2020"/>
+    </li>
+    <li>
+      <a name="PDF"/>
+    </li>
+    <li>
+      <a name="cairo"/>
+    </li>
+    <li>
+      <a name="murrell-groups-2021"/>
+    </li>
+    <li>
+      <a name="pkg:gridGeometry"/>
+    </li>
+    
+  </ul>
+
+  <hr/>
+  <p>
+    <a rel="license"
+    href="http://creativecommons.org/licenses/by/4.0/"><img class="CC"
+    alt="Creative Commons License" style="border-width:0"
+    src="https://i.creativecommons.org/l/by/4.0/88x31.png"/></a><br/><span
+    xmlns:dct="http://purl.org/dc/terms/"
+    property="dct:title">This document</span>
+    by <span xmlns:cc="http://creativecommons.org/ns#"
+    property="cc:attributionName">Paul
+    Murrell</span> is licensed under a <a rel="license"
+    href="http://creativecommons.org/licenses/by/4.0/">Creative
+    Commons Attribution 4.0 International License</a>.
+  </p>
+
+</body>
+</html>

@@ -1,0 +1,139 @@
+
+# The Path to Path Enlightenment
+
+```{r echo=FALSE}
+knitr::opts_chunk$set(comment = '')
+```
+
+## R Graphics: The painters model
+
+R graphics follows a "painters model":  when we draw a shape, it is 
+drawn over the top of previous drawing.  For example, the following
+code draws a circle followed by a rectangle. Both shapes have an
+opaque border, but a semitransparent fill, which allows us to 
+see that the rectangle is drawn on top of the circle.
+
+```{r}
+library(grid)
+```
+
+```{r fig.width=2, fig.height=2}
+grid.circle(.6, .6, r=.2, 
+            gp=gpar(col=4, lwd=5, fill=adjustcolor(4, alpha=.5)))
+grid.rect(.4, .4, width=.4, height=.4, 
+          gp=gpar(col=2, lwd=5, fill=adjustcolor(2, alpha=.5)))
+```
+
+## Graphics devices: Paths
+
+R graphics output is sent to a *graphics device* either to draw
+to the screen, or to record the drawing in a file.  For example,
+the `postscript()` device records drawing
+in a PostScript file.
+
+The painters model means that a graphics devices is only asked to
+draw one shape at a time, e.g., draw a circle *then* draw a rectangle.
+For example, the PostScript to draw a circle and a rectangle could look like
+the following.  The important part of the code is the clear separation
+into two shapes, each starting with a `newpath` and ending with a `fill`
+(to fill the shape).
+
+```{r echo=FALSE}
+system("convert ps-painters.ps ps-painters.png")
+cat(readLines("ps-painters.ps"), sep="\n")
+```
+
+![](ps-painters.png)
+
+However, many graphics devices support a more sophisticated drawing
+model based on *paths*.  In this model, a single path can be
+constructed from more than on shape.  For example, the PostScript
+code below draws the same two shapes as before, but draws them
+within a single path (and then fills that single path).
+
+```{r echo=FALSE}
+system("convert ps-path.ps ps-path.png")
+cat(readLines("ps-path.ps"), sep="\n")
+```
+
+![](ps-path.png)
+
+The result in this case is a single shape that is the union of the
+two individual shapes.  We can get even fancier results by
+controlling how "inside" of the path is interpreted.  For example,
+the following PostScript code creates exactly the same
+single path from the two shapes, but this time runs `eofill` 
+(rather than `fill`).  That changes to an "even-odd" fill rule
+(from the default "non-zero winding" rule), so the overlap 
+between the two shapes within the path is now "outside" the overall
+path and we get a shape with a hole in it.
+
+```{r echo=FALSE}
+system("convert ps-path-hole.ps ps-path-hole.png")
+cat(readLines("ps-path-hole.ps"), sep="\n")
+```
+
+![](ps-path-hole.png)
+
+Another element of the more sophisticated path-drawing model is the
+ability to construct a path from Bezier curves.  For example,
+the following PostScript code describes a path from a series of
+straight lines and Bezier curves.
+
+```{r echo=FALSE}
+system("convert ps-path-curve.ps ps-path-curve.png")
+cat(readLines("ps-path-curve.ps"), sep="\n")
+```
+
+![](ps-path-curve.png)
+
+## R-paths
+
+R provides functions to draw more complex shapes, that it calls "paths".
+However, we will refer to these as *R-paths* because they are not
+as sophisticated as the paths available on some graphics devices.
+
+The following code draws the R version of the combination of circle
+and rectangle with a hole where they overlap.
+
+```{r fig.width=2, fig.height=2}
+circle <- function(x, y, r) {
+    t <- seq(0, 2*pi, length.out=50)
+    list(x=x + r*cos(t), y=y + r*sin(t))
+}
+c <- circle(.6, .6, .2)
+grid.path(c(c$x, .2, .2, .6, .6),
+          c(c$y, .2, .6, .6, .2),
+          id.lengths=c(50, 4), rule="evenodd",
+          gp=gpar(col=2, lwd=5, fill=adjustcolor(2, alpha=.5)))
+```
+
+Although this shows that *some* aspects of real paths are available
+in R graphics, there are some limitations:
+
+* We cannot construct the path from shapes;  we have to generate
+  a series of points along the outline of the path ourselves
+  (e.g., the `circle()` function above).
+
+* We cannot construct a path from curves.  Even though it is possible to
+  draw a stand-alone Bezier curve (e.g., with the 'gridBezier' package),
+  we cannot build a path by adding a Bezier curve to other shapes.
+  Furthermore, R graphics never asks a graphics device to draw a curve;
+  it draws curves by drawing lots of short straight lines that 
+  approximate the curve.
+
+## Clipping paths
+
+The addition of clipping paths to the graphics engine actually 
+creates situation where we can *accidentally* access some of the
+more sophisticated path functionality of some graphics devices.
+
+## Caveats
+
+Note that there *are* a couple of ways that we can generate a more
+sophisticated path by combining simple shapes in R graphics
+
+* The `grid::grobCoords()` function.
+* The 'gridGeometry' package.
+
+
