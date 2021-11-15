@@ -627,7 +627,7 @@ grid.fill(as.path(circleGrob(1:2/3, r=.3),
     Other drawing is just left out of a path that already contains text
     and text is left out of a path
     if other drawing already exists.
-    This also applies to clipping paths.
+    This also applies to clipping paths on the <code>pdf()</code>device.
   </p>
   <!--
     "Unlike PostScript, PDF does not allow a single path to mix text
@@ -640,7 +640,7 @@ grid.fill(as.path(circleGrob(1:2/3, r=.3),
     As with groups (<a href="#murrell-groups-2021"/>)
     we cannot directly see (<code>grid.ls()</code>) or edit 
     (<code>grid.edit()</code>) the
-    grob that defines a path.  However, but with a little extra work,
+    grob that defines a path.  However, with a little extra work,
     it is possible to extract the
     <code>path</code> component of a stroke, fill, or fillStroke
     grob and edit/replace that.
@@ -676,7 +676,7 @@ grid.path(c(c1$x, c2$x), c(c1$y, c2$y), id=rep(1:2, each=50),
   ]]></rcode>  
   <p>
     Another approach to constructing paths from shapes is 
-    provided by the 'gridGeometry' (<a href="#pkg:gridGeometry"/>).
+    provided by the 'gridGeometry' package (<a href="#pkg:gridGeometry"/>).
     For example, the concentric circle problem can be solved
     using this package
     with the following code.
@@ -692,6 +692,33 @@ grid.polyclip(circleGrob(r=.4,), circleGrob(r=.2), "minus",
     However, some results, for example
     stroking the outline of text, that are possible with the
     new path features cannot be (easily) achieved with 'gridGeometry'.
+  </p>
+
+  <h3>Future work</h3>
+  <p>
+    In graphics systems like PostScript, the Adobe Portable Document Format,
+    the Cairo Graphics library, and SVG, a path can be constructed 
+    from a collection of path operations:
+    move to a point, add a straight line from the current point to
+    a new point, or add an arc, or a (cubic) Bezier curve,
+    or "close" a path with a straight line back to the
+    starting point.  A path may also consist of multiple subpaths,
+    with a "move" beginning a new subpath.
+  </p>
+  <p>
+    The interface described in this report demonstrates that we can
+    construct a path by adding complete subpaths based on shapes like circles,
+    rectangles, and polygons.
+  </p>
+  <p>
+    The 'grid' interface also provides <code>grid.move.to()</code> and
+    <code>grid.line.to()</code> to construct a path from straight line
+    segments and there is also a function to draw stand-alone Bezier curves,
+    <code>grid.bezier()</code>.
+    However, a small piece of future work would involve
+    adding a "curve to" interface that
+    provides a way to add an arc or a Bezier curve 
+    to the current point in a path.
   </p>
 
   <h2><a name="requirements">Technical requirements</a></h2>
@@ -742,8 +769,8 @@ grid.polyclip(circleGrob(r=.4,), circleGrob(r=.2), "minus",
     Technical Report 2021-03, Department of Statistics, The University of Auckland. 
     Version 1.
     [ <a href="how-to-cite.bib">bib</a> |
-      <a href="http://dx.doi.org/10.17608/k6.auckland.12649751">DOI</a> | 
-      <a href="https://stattech.blogs.auckland.ac.nz/2020/07/14/2020-04-catching-up-with-r-graphics/">http</a> ]
+      <a href="http://dx.doi.org/10.17608/k6.auckland.17019272">DOI</a> | 
+      <a href="https://stattech.blogs.auckland.ac.nz/2021/11/16/2021-03-stroking-and-filling-paths-in-r-graphics/">http</a> ]
   </p>
 
   <h2><a name="references">References</a></h2>
